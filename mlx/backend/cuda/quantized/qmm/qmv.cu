@@ -11,8 +11,37 @@
 
 namespace cutlass {
 
+using uint1b_mlx_t = integer_subbyte<1, false>;
 using uint3b_t = integer_subbyte<3, false>;
 using uint5b_t = integer_subbyte<5, false>;
+
+template <typename T, int N, FloatRoundStyle Round>
+struct NumericArrayConverter<T, uint1b_mlx_t, N, Round> {
+  static_assert(N % 8 == 0);
+
+  using result_type = Array<T, N>;
+  using source_type = Array<uint1b_mlx_t, N>;
+
+  CUTLASS_HOST_DEVICE
+  static result_type convert(const source_type& source) {
+    result_type result;
+    auto* s_base = reinterpret_cast<const uint8_t*>(&source);
+    CUTLASS_PRAGMA_UNROLL
+    for (int i = 0; i < N / 8; ++i) {
+      uint8_t packed = s_base[i];
+      CUTLASS_PRAGMA_UNROLL
+      for (int j = 0; j < 8; ++j) {
+        result[i * 8 + j] = T((packed >> j) & 0x01);
+      }
+    }
+    return result;
+  }
+
+  CUTLASS_HOST_DEVICE
+  result_type operator()(const source_type& s) const {
+    return convert(s);
+  }
+};
 
 template <typename T, int N, FloatRoundStyle Round>
 struct NumericArrayConverter<T, uint3b_t, N, Round> {
@@ -232,7 +261,8 @@ __global__ void qmv_kernel(
   }
 
   // Accumulations of current row.
-  cuda::std::conditional_t<(bits >= 8), float, T> sums[elems_per_thread] = {};
+  cuda::std::conditional_t<(bits == 1 || bits >= 8), float, T>
+      sums[elems_per_thread] = {};
 
   auto dequant_fma_tile = [&](int idx) {
     S scale = scales[idx / group_size];
@@ -362,7 +392,9 @@ inline void dispatch_quant_types(
     f.template operator()<cutlass::float_e2m1_t, cutlass::float_e4m3_t, 16>();
   } else {
     dispatch_groups(group_size, tag, [&]<int group_size>() {
-      if (bits == 2) {
+      if (bits == 1) {
+        f.template operator()<cutlass::uint1b_mlx_t, T, group_size>();
+      } else if (bits == 2) {
         f.template operator()<cutlass::uint2b_t, T, group_size>();
       } else if (bits == 3) {
         f.template operator()<cutlass::uint3b_t, T, group_size>();

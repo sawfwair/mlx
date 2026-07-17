@@ -63,14 +63,23 @@ affine_quantize(const T* w, uint8_t* out, T* scales, T* biases, size_t size) {
   w_min = cg::reduce(warp, w_min, min_op);
   w_max = cg::reduce(warp, w_max, max_op);
 
-  float scale = max((w_max - w_min) / n_bins, eps);
-  bool side = abs(w_min) > abs(w_max);
-  scale = side ? scale : -scale;
-  float edge = side ? w_min : w_max;
-  float q0 = round(edge / scale);
-  bool at_zero = q0 == 0.0f;
-  scale = at_zero ? scale : edge / q0;
-  float bias = at_zero ? 0 : edge;
+  float scale;
+  float bias;
+
+  if constexpr (bits == 1) {
+    // Affine 1-bit: bit 0 -> w_min, bit 1 -> w_max
+    scale = max(w_max - w_min, eps);
+    bias = w_min;
+  } else {
+    scale = max((w_max - w_min) / n_bins, eps);
+    bool side = abs(w_min) > abs(w_max);
+    scale = side ? scale : -scale;
+    float edge = side ? w_min : w_max;
+    float q0 = round(edge / scale);
+    bool at_zero = q0 == 0.0f;
+    scale = at_zero ? scale : edge / q0;
+    bias = at_zero ? 0 : edge;
+  }
 
   // Write out the scales and biases
   size_t gindex = in_index / group_size;
@@ -212,7 +221,9 @@ __global__ void affine_dequantize(
 #pragma clang loop unroll(full)
     for (int i = 0; i < pack_factor; i++) {
       uint8_t d;
-      if (bits == 2) {
+      if (bits == 1) {
+        d = (val >> i) & 0x01;
+      } else if (bits == 2) {
         d = (val >> (bits * i)) & 0x03;
       } else if (bits == 4) {
         d = (val >> (bits * i)) & 0x0f;
@@ -244,6 +255,9 @@ void dispatch_groups(int group_size, F&& f) {
 template <typename F>
 void dispatch_bits(int bits, F&& f) {
   switch (bits) {
+    case 1:
+      f(std::integral_constant<int, 1>{});
+      break;
     case 2:
       f(std::integral_constant<int, 2>{});
       break;
