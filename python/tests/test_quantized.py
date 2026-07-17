@@ -263,6 +263,60 @@ class TestQuantized(mlx_tests.MLXTestCase):
                 self.assertEqual(y_q.shape, y_hat.shape)
                 self.assertLess((y_q - y_hat).abs().max(), 1e-5)
 
+    def test_1bit_qmv_packed_bit_order(self):
+        bit_positions = [0, 1, 7, 8, 15, 16, 31]
+        packed_word = sum(1 << bit for bit in bit_positions)
+        packed = mx.array([[packed_word, 0, packed_word, 0]], dtype=mx.uint32)
+        scales = mx.ones((1, 4), dtype=mx.float32)
+        biases = mx.zeros((1, 4), dtype=mx.float32)
+        x = mx.arange(1, 129, dtype=mx.float32).reshape(1, 128)
+
+        actual = mx.quantized_matmul(
+            x,
+            packed,
+            scales,
+            biases,
+            transpose=True,
+            group_size=32,
+            bits=1,
+        )
+        expected = sum(position + 1 for position in bit_positions) + sum(
+            position + 65 for position in bit_positions
+        )
+        self.assertEqual(actual.shape, (1, 1))
+        self.assertEqual(actual.item(), expected)
+
+    def test_1bit_qmv_dtypes_groups_and_odd_rows(self):
+        key = mx.random.key(1729)
+        k1, k2 = mx.random.split(key)
+        for dtype, tol in [
+            (mx.float16, 2e-2),
+            (mx.bfloat16, 1e-1),
+            (mx.float32, 1e-5),
+        ]:
+            for group_size in [32, 64, 128]:
+                with self.subTest(dtype=dtype, group_size=group_size):
+                    x = mx.random.normal((3, 256), key=k1).astype(dtype)
+                    signs = (
+                        mx.random.uniform(shape=(67, 256), key=k2) > 0.5
+                    ).astype(dtype)
+                    w = signs * 0.6 - (1 - signs) * 0.2
+                    w_q, scales, biases = mx.quantize(w, group_size, 1)
+                    w_hat = mx.dequantize(
+                        w_q,
+                        scales,
+                        biases,
+                        group_size,
+                        1,
+                        dtype=dtype,
+                    )
+                    actual = mx.quantized_matmul(
+                        x, w_q, scales, biases, True, group_size, 1
+                    )
+                    expected = x @ w_hat.T
+                    self.assertEqual(actual.shape, (3, 67))
+                    self.assertLess((actual - expected).abs().max(), tol)
+
     def test_qqmv(self):
         key = mx.random.key(0)
         k1, k2 = mx.random.split(key)
@@ -499,7 +553,7 @@ class TestQuantized(mlx_tests.MLXTestCase):
         k1, k2 = mx.random.split(key)
         tests = product(
             [128, 64, 32],  # group_size
-            [2, 3, 4, 5, 6, 8],  # bits
+            [1, 2, 3, 4, 5, 6, 8],  # bits
             [256, 512, 67],  # M
             [64, 256],  # N
             [0, 1, 3, 8],  # B

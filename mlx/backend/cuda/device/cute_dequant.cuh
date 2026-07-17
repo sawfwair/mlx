@@ -9,8 +9,36 @@
 
 namespace cutlass {
 
+using uint1b_mlx_t = integer_subbyte<1, false>;
 using uint3b_t = integer_subbyte<3, false>;
 using uint5b_t = integer_subbyte<5, false>;
+
+template <typename T, int N, FloatRoundStyle Round>
+struct NumericArrayConverter<T, uint1b_mlx_t, N, Round> {
+  static_assert(N % 8 == 0);
+
+  using result_type = Array<T, N>;
+  using source_type = Array<uint1b_mlx_t, N>;
+
+  CUTLASS_HOST_DEVICE
+  static result_type convert(const source_type& source) {
+    result_type result;
+    auto* packed = reinterpret_cast<const uint8_t*>(&source);
+    CUTLASS_PRAGMA_UNROLL
+    for (int i = 0; i < N / 8; ++i) {
+      CUTLASS_PRAGMA_UNROLL
+      for (int bit = 0; bit < 8; ++bit) {
+        result[i * 8 + bit] = T((packed[i] >> bit) & 0x01);
+      }
+    }
+    return result;
+  }
+
+  CUTLASS_HOST_DEVICE
+  result_type operator()(const source_type& source) const {
+    return convert(source);
+  }
+};
 
 template <typename T, int N, FloatRoundStyle Round>
 struct NumericArrayConverter<T, uint3b_t, N, Round> {
