@@ -118,7 +118,8 @@ __device__ __forceinline__ void qmv_kernel_impl(
   }
 
   // Accumulations of current row.
-  cuda::std::conditional_t<(bits >= 8), float, T> sums[elems_per_thread] = {};
+  cuda::std::conditional_t<(bits == 1 || bits >= 8), float, T>
+      sums[elems_per_thread] = {};
 
   auto dequant_fma_tile = [&](int idx) {
     S scale = scales[idx / group_size];
@@ -383,7 +384,9 @@ inline void dispatch_quant_types(
     f.template operator()<cutlass::float_e2m1_t, cutlass::float_e4m3_t, 16>();
   } else {
     dispatch_groups(group_size, tag, [&]<int group_size>() {
-      if (bits == 2) {
+      if (bits == 1) {
+        f.template operator()<cutlass::uint1b_mlx_t, T, group_size>();
+      } else if (bits == 2) {
         f.template operator()<cutlass::uint2b_t, T, group_size>();
       } else if (bits == 3) {
         f.template operator()<cutlass::uint3b_t, T, group_size>();
