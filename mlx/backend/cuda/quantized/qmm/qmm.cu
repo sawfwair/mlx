@@ -141,6 +141,18 @@ bool supports_qmv(
     QuantizationMode mode,
     cu::Device& device) {
   int k = x.shape(-1);
+  if (mode == QuantizationMode::Affine) {
+    if (bits != 1 && bits != 2 && bits != 3 && bits != 4 && bits != 5 &&
+        bits != 6 && bits != 8) {
+      return false;
+    }
+    if (group_size != 32 && group_size != 64 && group_size != 128) {
+      return false;
+    }
+    if (k % group_size != 0 || !biases) {
+      return false;
+    }
+  }
   if (k % 8 != 0) {
     return false;
   }
