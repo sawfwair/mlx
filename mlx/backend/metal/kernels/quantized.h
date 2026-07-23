@@ -853,7 +853,8 @@ METAL_FUNC void qmv_fast_impl(
     uint3 tid [[threadgroup_position_in_grid]],
     uint simd_gid [[simdgroup_index_in_threadgroup]],
     uint simd_lid [[thread_index_in_simdgroup]]) {
-  constexpr int packs_per_thread = bits <= 2 ? 1 : 2;  // 1-bit: 1 pack (vpt=32) for occupancy
+  constexpr int packs_per_thread =
+      bits <= 2 ? 1 : 2; // 1-bit: 1 pack (vpt=32) for occupancy
   constexpr int num_simdgroups = 2;
   constexpr int results_per_simdgroup = 4;
   constexpr int pack_factor = get_pack_factor<bits, 32>();
@@ -903,8 +904,7 @@ METAL_FUNC void qmv_fast_impl(
   }
 
   if (aligned_end < in_vec_size) {
-    bool in_bounds =
-        (aligned_end + simd_lid * values_per_thread) < in_vec_size;
+    bool in_bounds = (aligned_end + simd_lid * values_per_thread) < in_vec_size;
     U sum = 0;
     if (in_bounds) {
       sum = load_vector<T, U, values_per_thread, bits>(x, x_thread);
