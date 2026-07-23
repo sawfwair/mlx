@@ -952,9 +952,10 @@ bool is_nax_available() {
       can_use_nax = true;
     }
     auto& d = metal::device(mlx::core::Device::gpu);
-    auto arch = d.get_architecture().back();
     auto gen = d.get_architecture_gen();
-    can_use_nax &= gen >= (arch == 'p' ? 18 : 17);
+    // Generation 17 advertises NAX support, but produces incorrect results for
+    // some low-bit affine quantized matrix-vector shapes.
+    can_use_nax &= gen >= 18;
     return can_use_nax;
   };
   static bool is_nax_available_ = _check_nax();
