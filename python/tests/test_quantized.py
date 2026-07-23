@@ -313,9 +313,9 @@ class TestQuantized(mlx_tests.MLXTestCase):
             for group_size in [32, 64, 128]:
                 with self.subTest(dtype=dtype, group_size=group_size):
                     x = mx.random.normal((3, 256), key=k1).astype(dtype)
-                    signs = (
-                        mx.random.uniform(shape=(67, 256), key=k2) > 0.5
-                    ).astype(dtype)
+                    signs = (mx.random.uniform(shape=(67, 256), key=k2) > 0.5).astype(
+                        dtype
+                    )
                     w = signs * 0.6 - (1 - signs) * 0.2
                     w_q, scales, biases = mx.quantize(w, group_size, 1)
                     w_hat = mx.dequantize(
