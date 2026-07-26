@@ -583,8 +583,13 @@ std::unordered_map<int, CommandEncoder>& get_command_encoders() {
 }
 
 std::unordered_map<int, CommandEncoder>& get_global_command_encoders() {
-  static std::unordered_map<int, CommandEncoder> encoders;
-  return encoders;
+  // Keep process-global encoders alive through static destruction. The CUDA
+  // runtime may already be shutting down when ordinary static destructors run,
+  // and CommandEncoder::~CommandEncoder synchronizes its CUDA stream. The OS
+  // reclaims these process-lifetime resources on exit; explicit clear_streams()
+  // still releases them when callers need deterministic teardown.
+  static auto* encoders = new std::unordered_map<int, CommandEncoder>;
+  return *encoders;
 }
 
 } // namespace mlx::core::cu
