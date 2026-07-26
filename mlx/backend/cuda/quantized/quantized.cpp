@@ -102,6 +102,15 @@ void QuantizedMatmul::eval_gpu(const std::vector<array>& inputs, array& out) {
   int K = x.shape(-1);
   int B = out.size() / (M * N);
 
+  // The affine 1-bit and 2-bit implementations live in qmv. The generic
+  // matrix kernels either do not support these packed weights (1-bit) or can
+  // produce an invalid large-M launch on post-sm90 devices (2-bit).
+  if (can_use_qmv && mode_ == QuantizationMode::Affine &&
+      (bits_ == 1 || bits_ == 2)) {
+    call_qmv();
+    return;
+  }
+
   if (can_use_qmm_sm90) {
     if (can_use_qmv && (M == 1 && B == 1 && N <= 16384 && K <= 16384)) {
       call_qmv();
