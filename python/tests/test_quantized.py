@@ -333,6 +333,21 @@ class TestQuantized(mlx_tests.MLXTestCase):
                     self.assertEqual(actual.shape, (3, 67))
                     self.assertLess((actual - expected).abs().max(), tol)
 
+    def test_low_bit_affine_large_m(self):
+        key = mx.random.key(2026)
+        k1, k2 = mx.random.split(key)
+        x = mx.random.normal(shape=(16, 256), key=k1)
+        w = mx.random.normal(shape=(67, 256), key=k2)
+
+        for bits in [1, 2]:
+            with self.subTest(bits=bits):
+                w_q, scales, biases = mx.quantize(w, 128, bits)
+                w_hat = mx.dequantize(w_q, scales, biases, 128, bits)
+                actual = mx.quantized_matmul(x, w_q, scales, biases, True, 128, bits)
+                expected = x @ w_hat.T
+                self.assertEqual(actual.shape, expected.shape)
+                self.assertLess((actual - expected).abs().max(), 1e-3)
+
     def test_qqmv(self):
         key = mx.random.key(0)
         k1, k2 = mx.random.split(key)
