@@ -72,8 +72,33 @@ void CustomKernel::eval_gpu(
     }
   }
 
-  auto lib = d.get_library(
-      name_, compile_options_, [this] { return metal::utils() + source_; });
+  auto lib = d.get_library(name_, compile_options_, [this] {
+    if (source_.find("MLX_INCLUDE_AFFINE_QUANTIZED_HEADERS") !=
+        std::string::npos) {
+      std::string kernel_source;
+      concatenate(
+          kernel_source,
+          metal::utils(),
+          metal::quantized_utils(),
+          metal::gemm(),
+          metal::quantized(),
+          source_);
+      return kernel_source;
+    }
+    if (source_.find("MLX_INCLUDE_FP_QUANTIZED_HEADERS") !=
+        std::string::npos) {
+      std::string kernel_source;
+      concatenate(
+          kernel_source,
+          metal::utils(),
+          metal::quantized_utils(),
+          metal::gemm(),
+          metal::fp_quantized(),
+          source_);
+      return kernel_source;
+    }
+    return metal::utils() + source_;
+  });
   auto kernel = d.get_kernel(name_, lib);
   auto& compute_encoder = metal::get_command_encoder(s);
   compute_encoder.set_compute_pipeline_state(kernel);
