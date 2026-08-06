@@ -372,6 +372,40 @@ void steel_matmul_regular_axpby(
 
   char devc = d.get_architecture().back();
   GEMM_TPARAM_MACRO(devc)
+  if (int value = env::get_var("MLX_GEMM_BM", 0); value > 0) {
+    bm = value;
+  }
+  if (int value = env::get_var("MLX_GEMM_BN", 0); value > 0) {
+    bn = value;
+  }
+  if (int value = env::get_var("MLX_GEMM_BK", 0); value > 0) {
+    bk = value;
+  }
+  if (int value = env::get_var("MLX_GEMM_WM", 0); value > 0) {
+    wm = value;
+  }
+  if (int value = env::get_var("MLX_GEMM_WN", 0); value > 0) {
+    wn = value;
+  }
+  const bool is_h3_projection_shape = M >= 32768 &&
+      ((N == 21504 && K == 5376) || (N == 5376 && K == 7168) ||
+       (N == 28672 && K == 5376) || (N == 5376 && K == 14336));
+  const int h3_tuning_override = env::get_var("MLX_GEMM_H3_TUNED", -1);
+  const bool use_h3_tuned_schedule = out.dtype() != float32 &&
+      ((h3_tuning_override < 0 && is_h3_projection_shape) ||
+       (h3_tuning_override == 1 && M >= 32768 && N >= 4096));
+  if (use_h3_tuned_schedule) {
+    bn = 64;
+    bk = 16;
+    wn = 2;
+    if (N >= 24576 || (N <= 8192 && K < 10000)) {
+      bm = 32;
+      wm = 1;
+    } else {
+      bm = 64;
+      wm = 2;
+    }
+  }
 
   // Prepare kernel name
   std::ostringstream kname;
@@ -436,7 +470,9 @@ void steel_matmul_regular_axpby(
   int tm = (M + bm - 1) / bm;
 
   // TODO: Explore device-based tuning for swizzle
-  int swizzle_log = 0; // tm >= 6 ? 3 : (tm <= 3 ? 0 : 2);
+  int swizzle_log = use_h3_tuned_schedule
+      ? 2
+      : env::get_var("MLX_GEMM_SWIZZLE_LOG", 0);
 
   // Prepare steel matmul params
   GEMMParams params{/* const int M = */ M,
