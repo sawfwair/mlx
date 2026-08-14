@@ -727,6 +727,26 @@ class TestQuantized(mlx_tests.MLXTestCase):
         self.assertEqual(y_q.shape, y_hat.shape)
         self.assertLess((y_q - y_hat).abs().max(), 1e-3)
 
+    def test_qmv_kernel_template_arity(self):
+        key = mx.random.key(0)
+        k1, k2 = mx.random.split(key)
+
+        # Affine qmv_fast has no results-per-simdgroup template parameter.
+        x = mx.random.normal(shape=(1, 256), key=k1)
+        w = mx.random.normal(shape=(64, 256), key=k2)
+        w_q, scales, biases = mx.quantize(w, group_size=32, bits=8)
+        w_hat = mx.dequantize(w_q, scales, biases, group_size=32, bits=8)
+        y_q = mx.quantized_matmul(x, w_q, scales, biases, True, group_size=32, bits=8)
+        self.assertTrue(mx.allclose(y_q, x @ w_hat.T, atol=1e-3, rtol=1e-3))
+
+        # The non-fast floating-point qmv template does not have one either.
+        x = mx.random.normal(shape=(1, 96), key=k1)
+        w = mx.random.normal(shape=(64, 96), key=k2)
+        w_q, scales = mx.quantize(w, mode="nvfp4")
+        w_hat = mx.dequantize(w_q, scales, mode="nvfp4")
+        y_q = mx.quantized_matmul(x, w_q, scales, transpose=True, mode="nvfp4")
+        self.assertTrue(mx.allclose(y_q, x @ w_hat.T, atol=1e-3, rtol=1e-3))
+
     def test_fp_qmv(self):
         key = mx.random.key(0)
         k1, k2 = mx.random.split(key)
