@@ -7,6 +7,7 @@
 #include "mlx/backend/cpu/copy.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/backend/cpu/gemm.h"
+#include "mlx/dtype_utils.h"
 #include "mlx/primitives.h"
 
 namespace mlx::core {
@@ -89,32 +90,28 @@ void matmul_general(
     }
   };
 
-  auto [a_transposed, lda, a] = check_transpose(a_pre);
-  auto [b_transposed, ldb, b] = check_transpose(b_pre);
+  // Keep these as ordinary local variables rather than structured bindings.
+  // Swift 6.0's Linux clang rejects captures of structured bindings here even
+  // when the package is compiled as C++20.
+  auto a_layout = check_transpose(a_pre);
+  auto b_layout = check_transpose(b_pre);
+  auto a_transposed = std::get<0>(a_layout);
+  auto lda = std::get<1>(a_layout);
+  auto a = std::get<2>(a_layout);
+  auto b_transposed = std::get<0>(b_layout);
+  auto ldb = std::get<1>(b_layout);
+  auto b = std::get<2>(b_layout);
   size_t M = a.shape(-2);
   size_t N = b.shape(-1);
   if (M == 0 || N == 0) {
     return;
   }
 
-  if (out.dtype() == float32) {
-    matmul_dispatch<float>(
+  dispatch_inexact_types(out.dtype(), "[Matmul::eval_cpu]", [&](auto type_tag) {
+    using T = MLX_GET_TYPE(type_tag);
+    matmul_dispatch<T>(
         a, b, out, a_transposed, b_transposed, lda, ldb, alpha, beta, stream);
-  } else if (out.dtype() == float16) {
-    matmul_dispatch<float16_t>(
-        a, b, out, a_transposed, b_transposed, lda, ldb, alpha, beta, stream);
-  } else if (out.dtype() == bfloat16) {
-    matmul_dispatch<bfloat16_t>(
-        a, b, out, a_transposed, b_transposed, lda, ldb, alpha, beta, stream);
-  } else if (out.dtype() == float64) {
-    matmul_dispatch<double>(
-        a, b, out, a_transposed, b_transposed, lda, ldb, alpha, beta, stream);
-  } else if (out.dtype() == complex64) {
-    matmul_dispatch<complex64_t>(
-        a, b, out, a_transposed, b_transposed, lda, ldb, alpha, beta, stream);
-  } else {
-    throw std::runtime_error("[Matmul::eval_cpu] Invalid type.");
-  }
+  });
   cpu::get_command_encoder(stream).add_temporaries(std::move(temps));
 }
 
