@@ -722,9 +722,7 @@ class TestQuantized(mlx_tests.MLXTestCase):
         w = mx.random.normal(shape=(N, K), key=k2) / K**0.5
         w_q, scales, biases = mx.quantize(w, group_size=128, bits=1)
         w_hat = mx.dequantize(w_q, scales, biases, group_size=128, bits=1)
-        y_q = mx.quantized_matmul(
-            x, w_q, scales, biases, True, group_size=128, bits=1
-        )
+        y_q = mx.quantized_matmul(x, w_q, scales, biases, True, group_size=128, bits=1)
         y_hat = x @ w_hat.T
         self.assertEqual(y_q.shape, y_hat.shape)
         self.assertLess((y_q - y_hat).abs().max(), 1e-3)

@@ -62,8 +62,7 @@ void CustomKernel::eval_gpu(
           source_);
       return kernel_source;
     }
-    if (source_.find("MLX_INCLUDE_FP_QUANTIZED_HEADERS") !=
-        std::string::npos) {
+    if (source_.find("MLX_INCLUDE_FP_QUANTIZED_HEADERS") != std::string::npos) {
       std::string kernel_source;
       concatenate(
           kernel_source,

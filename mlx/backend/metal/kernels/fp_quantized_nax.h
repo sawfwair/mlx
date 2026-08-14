@@ -81,14 +81,18 @@ static inline uint32_t fp4nv_pack4(const device uint8_t* p) {
 
 template <typename T>
 static inline void fp4nv_decode8(uint32_t c, float scale, thread T* out) {
-  const float2 v0 = float2(as_type<half2>(
-                        ((c & 0x00070007u) << 9) | ((c & 0x00080008u) << 12))) *
+  const float2 v0 =
+      float2(
+          as_type<half2>(
+              ((c & 0x00070007u) << 9) | ((c & 0x00080008u) << 12))) *
       scale;
-  const float2 v1 = float2(as_type<half2>(
-                        ((c & 0x00700070u) << 5) | ((c & 0x00800080u) << 8))) *
+  const float2 v1 =
+      float2(
+          as_type<half2>(((c & 0x00700070u) << 5) | ((c & 0x00800080u) << 8))) *
       scale;
-  const float2 v2 = float2(as_type<half2>(
-                        ((c & 0x07000700u) << 1) | ((c & 0x08000800u) << 4))) *
+  const float2 v2 =
+      float2(
+          as_type<half2>(((c & 0x07000700u) << 1) | ((c & 0x08000800u) << 4))) *
       scale;
   const float2 v3 =
       float2(as_type<half2>(((c & 0x70007000u) >> 3) | (c & 0x80008000u))) *

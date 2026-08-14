@@ -471,9 +471,8 @@ void steel_matmul_regular_axpby(
   int tm = (M + bm - 1) / bm;
 
   // TODO: Explore device-based tuning for swizzle
-  int swizzle_log = use_h3_tuned_schedule
-      ? 2
-      : env::get_var("MLX_GEMM_SWIZZLE_LOG", 0);
+  int swizzle_log =
+      use_h3_tuned_schedule ? 2 : env::get_var("MLX_GEMM_SWIZZLE_LOG", 0);
 
   // Prepare steel matmul params
   GEMMParams params{/* const int M = */ M,
