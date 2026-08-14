@@ -35,6 +35,19 @@ make_jit_source(indexing/gather_axis)
 make_jit_source(indexing/scatter_axis)
 make_jit_source(hadamard)
 
+# Custom Metal kernels can opt into the quantized helper headers even when the
+# built-in kernels use the precompiled metallib. Keep the corresponding source
+# strings linked in both AOT and JIT builds so CustomKernel::eval_gpu can build
+# those marked kernels at runtime.
+make_jit_source(
+  steel/gemm/gemm kernels/steel/utils.h kernels/steel/gemm/loader.h
+  kernels/steel/gemm/mma.h kernels/steel/gemm/params.h
+  kernels/steel/gemm/transforms.h)
+make_jit_source(quantized_utils)
+make_jit_source(quantized kernels/quantized_utils.h)
+make_jit_source(fp_quantized kernels/quantized_utils.h kernels/fp8.h
+                kernels/fp4.h)
+
 if(MLX_METAL_JIT)
   target_sources(mlx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/jit_kernels.cpp)
   make_jit_source(arange)
@@ -52,10 +65,6 @@ if(MLX_METAL_JIT)
   make_jit_source(
     reduce kernels/reduction/reduce_all.h kernels/reduction/reduce_col.h
     kernels/reduction/reduce_row.h kernels/reduction/reduce_init.h)
-  make_jit_source(
-    steel/gemm/gemm kernels/steel/utils.h kernels/steel/gemm/loader.h
-    kernels/steel/gemm/mma.h kernels/steel/gemm/params.h
-    kernels/steel/gemm/transforms.h)
   make_jit_source(steel/gemm/kernels/steel_gemm_fused)
   make_jit_source(steel/gemm/kernels/steel_gemm_masked kernels/steel/defines.h)
   make_jit_source(steel/gemm/kernels/steel_gemm_gather)
@@ -76,10 +85,6 @@ if(MLX_METAL_JIT)
   make_jit_source(steel/conv/kernels/steel_conv_general kernels/steel/defines.h
                   kernels/steel/conv/loaders/loader_general.h)
 
-  make_jit_source(quantized_utils)
-  make_jit_source(quantized kernels/quantized_utils.h)
-  make_jit_source(fp_quantized kernels/quantized_utils.h kernels/fp8.h
-                  kernels/fp4.h)
   make_jit_source(gemv)
   make_jit_source(gemv_masked)
 
