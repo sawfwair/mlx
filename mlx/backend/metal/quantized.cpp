@@ -143,9 +143,9 @@ inline int get_qmv_batch_limit(int D, int O, metal::Device& d) {
 }
 
 // Must match the K step in qmv_fast_impl (kernels/quantized.h):
-//   pack_factor<bits, 32>() * (bits == 2 ? 1 : 2) * SIMD_SIZE
+//   pack_factor<bits, 32>() * (bits <= 2 ? 1 : 2) * SIMD_SIZE
 inline int qmv_fast_k_alignment(int bits) {
-  return get_pack_factor(bits, 32) * (bits == 2 ? 1 : 2) * 32;
+  return get_pack_factor(bits, 32) * (bits <= 2 ? 1 : 2) * 32;
 }
 
 inline int add_strides_and_shapes(

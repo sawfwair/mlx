@@ -711,6 +711,24 @@ class TestQuantized(mlx_tests.MLXTestCase):
                 self.assertEqual(y_q.shape, y_hat.shape)
                 self.assertLess((y_q - y_hat).abs().max(), 1e-3)
 
+    def test_qmv_fast_1bit_alignment(self):
+        # The Metal host dispatch and qmv_fast kernel must agree that 1-bit
+        # weights use one 32-value pack per lane: 32 * 1 * 32 = 1024 values.
+        key = mx.random.key(0)
+        k1, k2 = mx.random.split(key)
+        K = 1024
+        N = 67
+        x = mx.random.normal(shape=(1, K), key=k1) / K**0.5
+        w = mx.random.normal(shape=(N, K), key=k2) / K**0.5
+        w_q, scales, biases = mx.quantize(w, group_size=128, bits=1)
+        w_hat = mx.dequantize(w_q, scales, biases, group_size=128, bits=1)
+        y_q = mx.quantized_matmul(
+            x, w_q, scales, biases, True, group_size=128, bits=1
+        )
+        y_hat = x @ w_hat.T
+        self.assertEqual(y_q.shape, y_hat.shape)
+        self.assertLess((y_q - y_hat).abs().max(), 1e-3)
+
     def test_fp_qmv(self):
         key = mx.random.key(0)
         k1, k2 = mx.random.split(key)
