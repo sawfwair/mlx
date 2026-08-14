@@ -90,8 +90,17 @@ void matmul_general(
     }
   };
 
-  auto [a_transposed, lda, a] = check_transpose(a_pre);
-  auto [b_transposed, ldb, b] = check_transpose(b_pre);
+  // Keep these as ordinary local variables rather than structured bindings.
+  // Swift 6.0's Linux clang rejects captures of structured bindings here even
+  // when the package is compiled as C++20.
+  auto a_layout = check_transpose(a_pre);
+  auto b_layout = check_transpose(b_pre);
+  auto a_transposed = std::get<0>(a_layout);
+  auto lda = std::get<1>(a_layout);
+  auto a = std::get<2>(a_layout);
+  auto b_transposed = std::get<0>(b_layout);
+  auto ldb = std::get<1>(b_layout);
+  auto b = std::get<2>(b_layout);
   size_t M = a.shape(-2);
   size_t N = b.shape(-1);
   if (M == 0 || N == 0) {
