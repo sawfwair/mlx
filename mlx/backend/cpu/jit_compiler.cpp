@@ -1,6 +1,10 @@
 // Copyright © 2024-2026 Apple Inc.
 
 #include "mlx/backend/cpu/jit_compiler.h"
+
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
 #include "mlx/backend/common/utils.h"
 #include "mlx/backend/cpu/compiled_preamble.h"
 
@@ -205,6 +209,10 @@ bool JitCompiler::available() {
     }
   }();
   return result;
+#elif defined(__APPLE__) && !TARGET_OS_OSX
+  // iOS and its relatives cannot spawn child processes, so a toolchain-backed
+  // CPU JIT can never be available there; Metal kernels cover these targets.
+  return false;
 #else
 #ifdef _WIN32
   static int result = std::system("g++ --version > NUL 2>&1");
