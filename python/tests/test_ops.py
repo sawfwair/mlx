@@ -126,6 +126,27 @@ class TestOps(mlx_tests.MLXTestCase):
             mx.broadcast_to(a, [too_big, 1])
         self.assertIn(str(too_big), str(cm.exception))
 
+        # A concatenation axis that does not fit is computed rather than given,
+        # so it has to be reported instead of wrapping into a bogus dimension.
+        # These stay lazy, so nothing near this size is allocated.
+        big = mx.zeros(2**30)
+        for parts in (3, 4, 5):
+            with self.assertRaises(OverflowError) as cm:
+                mx.concatenate([big] * parts)
+            self.assertIn(str(2**30 * parts), str(cm.exception))
+
+        # repeat and kron multiply a dimension, and used to wrap into a
+        # negative or zero one that only surfaced later as a confusing reshape
+        # error naming a shape the caller never asked for.
+        for parts in (2, 3, 4):
+            with self.assertRaises(OverflowError) as cm:
+                mx.repeat(big, parts)
+            self.assertIn(str(2**30 * parts), str(cm.exception))
+
+        with self.assertRaises(OverflowError) as cm:
+            mx.kron(mx.zeros(2**16), mx.zeros(2**16))
+        self.assertIn(str(2**32), str(cm.exception))
+
         # Negative overflow (< int32 min) is caught too.
         too_negative = -(2**31) - 1
         with self.assertRaises(OverflowError) as cm:
@@ -344,6 +365,14 @@ class TestOps(mlx_tests.MLXTestCase):
         self.assertEqual(z.item(), 2)
 
     def test_remainder(self):
+        # Complex is not supported and has to say so rather than quietly
+        # computing a componentwise remainder, which no other library defines
+        z = mx.array([7 + 3j], mx.complex64)
+        with self.assertRaises(ValueError):
+            mx.remainder(z, z)
+        with self.assertRaises(ValueError):
+            z % z
+
         for dt in [mx.int32, mx.float32, mx.float16, mx.bfloat16]:
             x = mx.array(2, dtype=dt)
             y = mx.array(4, dtype=dt)
@@ -985,10 +1014,20 @@ class TestOps(mlx_tests.MLXTestCase):
         out = mx.var(x, ddof=3)
         self.assertEqual(out.item(), float("inf"))
 
+        x = mx.array([1 + 2j, -3 - 4j, 0.5 - 0.25j])
+        x_np = np.array(x)
+        self.assertEqual(mx.var(x).dtype, mx.float32)
+        self.assertAlmostEqual(mx.var(x).item(), x_np.var().item(), places=5)
+
     def test_std(self):
         x = mx.random.uniform(shape=(5, 5))
         x_np = np.array(x)
         self.assertAlmostEqual(mx.std(x).item(), x_np.std().item(), places=6)
+
+        x = mx.array([1 + 2j, -3 - 4j, 0.5 - 0.25j])
+        x_np = np.array(x)
+        self.assertEqual(mx.std(x).dtype, mx.float32)
+        self.assertAlmostEqual(mx.std(x).item(), x_np.std().item(), places=5)
 
     def test_abs(self):
         a = mx.array([-1.0, 1.0, -2.0, 3.0])
@@ -1623,9 +1662,11 @@ class TestOps(mlx_tests.MLXTestCase):
             a = mx.arange(float("inf"), 1, float("inf"))
         with self.assertRaises(ValueError):
             a = mx.arange(float("inf"), 1, 5)
-        with self.assertRaises(TypeError):
+        with self.assertRaises(ValueError):
             INT_MAX = 2147483647
             a = mx.arange(0, INT_MAX + 1, 1)
+        with self.assertRaises(ValueError):
+            a = mx.arange(0, 2**40)
 
         a = mx.arange(5)
         expected = [0, 1, 2, 3, 4]
@@ -1689,6 +1730,57 @@ class TestOps(mlx_tests.MLXTestCase):
         a = mx.arange(1.0, 3.0, 0.2, dtype=mx.int32)
         self.assertEqual(a.dtype, mx.int32)
 
+        # Integers that do not fit in int32 widen the inferred dtype to int64,
+        # matching the scalar inference of mx.array and numpy.
+        a = mx.arange(2**40, 2**40 + 3)
+        self.assertEqual(a.dtype, mx.int64)
+        self.assertListEqual(a.tolist(), [2**40, 2**40 + 1, 2**40 + 2])
+
+        a = mx.arange(-(2**40), -(2**40) + 3)
+        self.assertEqual(a.dtype, mx.int64)
+        self.assertListEqual(a.tolist(), [-(2**40), -(2**40) + 1, -(2**40) + 2])
+
+        # int32 boundaries themselves still infer int32.
+        a = mx.arange(2**31 - 3, 2**31 - 1)
+        self.assertEqual(a.dtype, mx.int32)
+        self.assertListEqual(a.tolist(), [2**31 - 3, 2**31 - 2])
+
+        a = mx.arange(-(2**31), -(2**31) + 2)
+        self.assertEqual(a.dtype, mx.int32)
+        self.assertListEqual(a.tolist(), [-(2**31), -(2**31) + 1])
+
+        # The first values that no longer fit widen as well.
+        a = mx.arange(-(2**31) - 1, -(2**31) + 1)
+        self.assertEqual(a.dtype, mx.int64)
+        self.assertListEqual(a.tolist(), [-(2**31) - 1, -(2**31)])
+
+        # A large step also widens the inferred dtype.
+        a = mx.arange(2**40, 2**40 + 3, 2**40)
+        self.assertEqual(a.dtype, mx.int64)
+        self.assertListEqual(a.tolist(), [2**40])
+
+        a = mx.arange(stop=2, step=2**40)
+        self.assertEqual(a.dtype, mx.int64)
+        self.assertListEqual(a.tolist(), [0])
+
+        # A negative step with widened values.
+        a = mx.arange(2**40 + 3, 2**40, -1)
+        self.assertEqual(a.dtype, mx.int64)
+        self.assertListEqual(a.tolist(), [2**40 + 3, 2**40 + 2, 2**40 + 1])
+
+        # The stop-only overload widens too, even for an empty result.
+        a = mx.arange(stop=2**40, step=-1)
+        self.assertEqual(a.dtype, mx.int64)
+        self.assertEqual(a.shape, (0,))
+
+        # An explicit dtype takes precedence over the widened inference.
+        a = mx.arange(2**40, 2**40 + 3, dtype=mx.int32)
+        self.assertEqual(a.dtype, mx.int32)
+
+        # A float in the mix still infers float32.
+        a = mx.arange(0.5, 2**40, 2**39)
+        self.assertEqual(a.dtype, mx.float32)
+
     def test_arange_corner_cases_cast(self):
         a = mx.arange(0, 3, 0.2, dtype=mx.int32)
         expected = [0] * 15
@@ -1742,6 +1834,20 @@ class TestOps(mlx_tests.MLXTestCase):
         a = mx.arange(0, -10, float("-inf"))
         expected = [0]
         self.assertListEqual(a.tolist(), expected)
+
+        # The range crossing the int32 limit widens the dtype to int64 instead
+        # of saturating or wrapping.
+        n = mx.iinfo(mx.int32).max
+        result = mx.arange(n - 1, n + 3)
+        self.assertEqual(result.shape, (4,))
+        self.assertEqual(result.dtype, mx.int64)
+        self.assertEqual(result.tolist(), [n - 1, n, n + 1, n + 2])
+
+        # An explicit dtype keeps the previous wrapping behaviour.
+        result = mx.arange(n - 1, n + 3, dtype=mx.int32)
+        self.assertEqual(result.shape, (4,))
+        self.assertEqual(result.dtype, mx.int32)
+        self.assertEqual(result.tolist(), [n - 1, n, -2147483648, -2147483647])
 
     def test_hanning_general(self):
         a = mx.hanning(10)
@@ -2717,6 +2823,27 @@ class TestOps(mlx_tests.MLXTestCase):
         y_mx = mx.sort(a, axis=-1)
         y_np = np.sort(np.array(a), axis=-1)
         self.assertTrue(np.array_equal(y_np, y_mx))
+
+        # Negative stride on an axis that is not sorted, single and multi block
+        np.random.seed(0)
+        for dtype in ("int32", "float32"):
+            for size in (4, 32769):
+                with self.subTest(dtype=dtype, size=size):
+                    a_np = np.random.uniform(0, 100, size=(3, size))
+                    a_np = a_np.astype(getattr(np, dtype))
+                    a_mx = mx.array(a_np)[::-1, :]
+                    a_np = a_np[::-1, :]
+
+                    b_np = np.sort(a_np, axis=-1)
+                    self.assertTrue(np.array_equal(b_np, mx.sort(a_mx, axis=-1)))
+
+                    idx = mx.argsort(a_mx, axis=-1)
+                    self.assertTrue(
+                        np.array_equal(b_np, mx.take_along_axis(a_mx, idx, axis=-1))
+                    )
+
+                    b_mx = mx.partition(a_mx, 1, axis=-1)
+                    self.assertTrue(np.array_equal(b_np[:, 1], np.array(b_mx)[:, 1]))
 
     def test_partition(self):
         shape = (3, 4, 5)
