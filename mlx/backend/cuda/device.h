@@ -18,7 +18,7 @@ std::pair<std::string, bool> subgraph_to_key(cudaGraph_t graph);
 
 class Worker;
 
-class CommandEncoder {
+class MLX_API CommandEncoder {
  public:
   struct CaptureContext {
     CaptureContext(CommandEncoder& enc);
@@ -138,6 +138,8 @@ class CommandEncoder {
     std::string id;
   };
 
+  void commit_impl();
+  void clear_graph_state();
   void insert_graph_dependencies(GraphNode node);
   void insert_graph_dependencies(std::vector<GraphNode> nodes);
 
@@ -163,7 +165,7 @@ class CommandEncoder {
   int max_mb_per_graph_;
 };
 
-class Device {
+class MLX_API Device {
  public:
   explicit Device(int device);
   ~Device();
