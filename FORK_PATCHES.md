@@ -36,3 +36,7 @@ The v0.32.4 integration additionally fixes the retained CPU 1-bit transposed
 matmul path to accumulate FP16/BF16 products in float. Its existing
 dtype/group/odd-row regression keeps its original tolerances. Wider affine
 bit widths retain their previous arithmetic.
+
+The Linux SwiftPM compiler additionally requires an explicit `typename` for
+the dependent CPU reduction accumulator alias. This syntax-only portability
+fix retains the upstream reduction type and arithmetic.
