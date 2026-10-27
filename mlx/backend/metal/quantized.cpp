@@ -18,6 +18,12 @@ namespace mlx::core {
 
 namespace {
 
+bool is_quantized_nax_available() {
+  // Keep the generation-17 quantized workaround local to quantized dispatch.
+  return metal::is_nax_available() &&
+      metal::device(Device::gpu).get_architecture_gen() >= 18;
+}
+
 template <typename... Args>
 auto get_quantized_kernel_wrapped(
     metal::Device& d,
@@ -1084,7 +1090,7 @@ void qmm(
       "qmm global scale requires transposed weights without biases");
 
   bool has_nax_kernel =
-      metal::is_nax_available() && (transpose || mode == "affine");
+      is_quantized_nax_available() && (transpose || mode == "affine");
   bool nax_aligned = (K % 64 == 0) && (transpose || N % 64 == 0);
   if (has_nax_kernel && nax_aligned &&
       (env::enable_tf32() || x.dtype() != float32)) {
@@ -1305,7 +1311,7 @@ void gather_qmm(
     metal::Device& d,
     const Stream& s,
     const std::string& mode) {
-  if (metal::is_nax_available() && transpose && (K % 64 == 0) &&
+  if (is_quantized_nax_available() && transpose && (K % 64 == 0) &&
       (env::enable_tf32() || x.dtype() != float32)) {
     return gather_qmm_nax(
         /* const array& x = */ x,
@@ -1700,7 +1706,7 @@ void gather_qmm_rhs(
     metal::Device& d,
     const Stream& s,
     const std::string mode) {
-  if (metal::is_nax_available() &&
+  if (is_quantized_nax_available() &&
       (env::enable_tf32() || x_.dtype() != float32)) {
     return gather_qmm_rhs_nax(
         /* const array& x_ = */ x_,
@@ -2238,7 +2244,7 @@ void GatherQQMM::eval_gpu(const std::vector<array>& inputs, array& out) {
   int B = out.size() / M / N;
   bool use_matrix_kernels = has_global_scales && w_quantized &&
       x.dtype() == bfloat16 && w_q.ndim() == 3 &&
-      K % (metal::is_nax_available() ? 64 : 32) == 0;
+      K % (is_quantized_nax_available() ? 64 : 32) == 0;
 
   if (use_matrix_kernels && M == 1 && B >= 16 && right_sorted_) {
     int E = w_q.size() / w_q.shape(-1) / w_q.shape(-2);

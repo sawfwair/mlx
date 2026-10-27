@@ -384,6 +384,56 @@ class TestQuantized(mlx_tests.MLXTestCase):
                 self.assertEqual(actual.shape, expected.shape)
                 self.assertLess((actual - expected).abs().max(), 1e-3)
 
+    @unittest.skipIf(not mx.metal.is_available(), "requires Metal")
+    def test_quantized_nax_threshold_matches_float_reference(self):
+        mx.random.seed(1729)
+        m, n, k = 64, 9216, 512
+        for dtype, bits in product([mx.float16, mx.bfloat16], [1, 2, 4, 8]):
+            with self.subTest(dtype=dtype, bits=bits):
+                x = mx.random.normal((m, 1, k)).astype(dtype)
+                w = mx.random.normal((2, n, k)).astype(dtype)
+                wq, scales, biases = mx.quantize(w, group_size=128, bits=bits)
+                restored = mx.dequantize(
+                    wq, scales, biases, group_size=128, bits=bits
+                ).astype(mx.float32)
+                actual = mx.quantized_matmul(
+                    x[:, 0],
+                    wq[0],
+                    scales[0],
+                    biases[0],
+                    transpose=True,
+                    group_size=128,
+                    bits=bits,
+                )
+                expected = x[:, 0].astype(mx.float32) @ restored[0].T
+                rhs = (mx.arange(m) // (m // 2)).astype(mx.uint32)
+                gathered = mx.gather_qmm(
+                    x,
+                    wq,
+                    scales,
+                    biases,
+                    rhs_indices=rhs,
+                    transpose=True,
+                    group_size=128,
+                    bits=bits,
+                    sorted_indices=True,
+                )
+                gathered_expected = mx.gather_mm(
+                    x.astype(mx.float32),
+                    mx.swapaxes(restored, -1, -2),
+                    rhs_indices=rhs,
+                    sorted_indices=True,
+                )
+                for result, reference in [
+                    (actual, expected),
+                    (gathered, gathered_expected),
+                ]:
+                    error = result.astype(mx.float32) - reference
+                    relative = mx.sqrt(
+                        mx.sum(error * error) / mx.sum(reference * reference)
+                    ).item()
+                    self.assertLess(relative, 1e-2)
+
     def test_qqmv(self):
         key = mx.random.key(0)
         k1, k2 = mx.random.split(key)

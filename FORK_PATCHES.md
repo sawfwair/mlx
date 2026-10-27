@@ -9,7 +9,7 @@ The integration retains both histories so owned changes remain auditable.
 | d2d7138cf | Replace shared CPU/Metal 1-bit support with upstream; retain CUDA quantize/dequantize extensions. |
 | 5743cb8a7 | Retain 1-bit fast-dispatch alignment guards. |
 | 3e0fa1fa1 | Retain one-pack-per-lane 1-bit occupancy geometry. |
-| 564c1160f | Retain generation-17 low-bit NAX correctness gate. |
+| 564c1160f | Retain the generation-17 NAX restriction only in quantized dispatch; restore upstream availability for floating-point matmul, attention, and gated delta. |
 | 629f09185 | Retain bit-width/batch-size affine QMV dispatch. |
 | 3ebf6207f | Retain native CUDA 1-bit QMV. |
 | dde9c8359 | Retain formatting of surviving low-bit code. |
@@ -40,3 +40,10 @@ bit widths retain their previous arithmetic.
 The Linux SwiftPM compiler additionally requires an explicit `typename` for
 the dependent CPU reduction accumulator alias. This syntax-only portability
 fix retains the upstream reduction type and arithmetic.
+
+The generation-17 NAX workaround is scoped to all four quantized dispatch
+and alignment decisions. Floating-point operations use upstream device
+availability. The matched 127,242-token BF16 ablation fails with the global
+guard and matches stock upstream token-for-token with upstream availability.
+The quantized regression covers FP16/BF16 activations at the historical
+64-by-9216 threshold across 1/2/4/8-bit ordinary and gathered matmul.
