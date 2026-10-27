@@ -174,7 +174,8 @@ void _qmm_t(
 
     for (int n = 0; n < N; n++) {
       const T* x_local = x;
-      T sum = 0;
+      using Accum = std::conditional_t<bits == 1, float, T>;
+      Accum sum = 0;
       for (int k = 0; k < K; k += group_size) {
         T scale = *scales_local++;
         T bias = *biases_local++;
@@ -194,8 +195,16 @@ void _qmm_t(
             uint8_t wi = *w_local++;
 #pragma clang loop unroll(full)
             for (int p = 0; p < pack_factor; p++) {
-              sum +=
-                  (*x_local++) * (scale * static_cast<T>(wi & bitmask) + bias);
+              if constexpr (bits == 1) {
+                // Match dequantize-then-matmul: round each weight to T, but
+                // accumulate the dot product in float for FP16/BF16 inputs.
+                const T weight = scale * static_cast<T>(wi & bitmask) + bias;
+                sum +=
+                    static_cast<float>(*x_local++) * static_cast<float>(weight);
+              } else {
+                sum += (*x_local++) *
+                    (scale * static_cast<T>(wi & bitmask) + bias);
+              }
               if (bits != 8) {
                 wi >>= bits;
               }

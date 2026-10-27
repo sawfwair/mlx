@@ -31,3 +31,8 @@ The quantization suite retains owned packed-bit-order, dtype/group/odd-row,
 large-M, fast-alignment, and host/template execution regressions. Upstream's
 CUDA 1-bit skips are not carried over: this fork implements that backend.
 CUDA execution requires a CUDA host; Metal results do not validate CUDA.
+
+The v0.32.4 integration additionally fixes the retained CPU 1-bit transposed
+matmul path to accumulate FP16/BF16 products in float. Its existing
+dtype/group/odd-row regression keeps its original tolerances. Wider affine
+bit widths retain their previous arithmetic.
