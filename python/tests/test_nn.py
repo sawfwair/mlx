@@ -1,5 +1,6 @@
 # Copyright © 2023-2024 Apple Inc.
 
+import math
 import os
 import tempfile
 import unittest
@@ -263,7 +264,7 @@ class TestBase(mlx_tests.MLXTestCase):
         m = nn.Sequential(
             nn.Embedding(5, 256), nn.ReLU(), nn.Linear(256, 256, bias=False)
         )
-        with self.assertRaises(ValueError) as context:
+        with self.assertRaises(ValueError):
             nn.quantize(m, group_size=32, mode="mxfp8", quantize_input=True)
 
     def test_quantize_freeze(self):
@@ -409,6 +410,28 @@ class TestLayers(mlx_tests.MLXTestCase):
         layer = nn.Bilinear(input1_dims=2, input2_dims=4, output_dims=6)
         outputs = layer(inputs1, inputs2)
         self.assertEqual(outputs.shape, (10, 6))
+
+    def test_norm_eps_validation(self):
+        # eps is added under a square root. A negative one makes rsqrt take the
+        # root of a negative number, so the layer emits NaN for whichever
+        # elements have a small enough variance, which is only a partial NaN and
+        # easy to miss. Zero is rejected too: it leaves rsqrt(0) for any input
+        # whose variance is zero, which is a whole NaN row. This matches the eps
+        # guards the optimizers already carry.
+        builders = (
+            ("LayerNorm", lambda eps: nn.LayerNorm(16, eps=eps)),
+            ("RMSNorm", lambda eps: nn.RMSNorm(16, eps=eps)),
+            ("GroupNorm", lambda eps: nn.GroupNorm(4, 16, eps=eps)),
+            ("InstanceNorm", lambda eps: nn.InstanceNorm(16, eps=eps)),
+            ("BatchNorm", lambda eps: nn.BatchNorm(16, eps=eps)),
+        )
+        for name, build in builders:
+            for eps in (-1.0, -1e-30, 0.0):
+                with self.assertRaisesRegex(ValueError, "must be positive"):
+                    build(eps)
+            # Anything positive still constructs, including a very small eps.
+            for eps in (1e-30, 1e-5, 1.0):
+                build(eps)
 
     def test_group_norm(self):
         x = mx.arange(100, dtype=mx.float32)
@@ -671,6 +694,21 @@ class TestLayers(mlx_tests.MLXTestCase):
         ]
         self.assertTrue(x.shape == y.shape)
         self.assertTrue(np.allclose(y, expected_y, atol=1e-5))
+        # Reduced-precision statistics must not overflow for finite feature maps.
+        checkerboard = np.indices((4, 4, 4)).sum(axis=0) % 2
+        x = mx.array(
+            np.stack(
+                [
+                    np.where(checkerboard, -512, 512),
+                    np.where(checkerboard, -256, 256),
+                ],
+                axis=-1,
+            ).astype(np.float16)
+        )[None]
+        y = nn.InstanceNorm(dims=2)(x)
+        self.assertEqual(y.dtype, mx.float16)
+        self.assertTrue(mx.allclose(y.min(), mx.array(-1.0, dtype=mx.float16)))
+        self.assertTrue(mx.allclose(y.max(), mx.array(1.0, dtype=mx.float16)))
         # Test repr
         self.assertTrue(str(inorm) == "InstanceNorm(3, eps=1e-05, affine=False)")
         # Raise for inputs without spatial dimensions
@@ -992,6 +1030,23 @@ class TestLayers(mlx_tests.MLXTestCase):
         c = nn.Conv2d(4, 8, 3, padding=1, stride=1, groups=2)
         y = c(x)
         self.assertEqual(y.shape, (4, 7, 7, 8))
+
+    def test_conv_grouped_init(self):
+        # weights are drawn from U(-s, s) with s = 1 / sqrt(fan_in), where
+        # fan_in only counts the input channels each group sees
+        mx.random.seed(0)
+        for groups in (1, 2, 4):
+            layers = [
+                nn.Conv1d(64, 64, kernel_size=3, groups=groups),
+                nn.Conv2d(64, 64, kernel_size=3, groups=groups),
+            ]
+            for layer in layers:
+                w = layer.weight
+                fan_in = math.prod(w.shape[1:])
+                bound = 1 / math.sqrt(fan_in)
+                w_max = mx.abs(w).max().item()
+                self.assertLessEqual(w_max, bound)
+                self.assertGreater(w_max, 0.95 * bound)
 
     def test_conv_transpose_extra_repr(self):
         self.assertIn(

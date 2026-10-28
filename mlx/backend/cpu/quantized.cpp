@@ -1,4 +1,4 @@
-// Copyright © 2023 Apple Inc.
+// Copyright © 2023-2026 Apple Inc.
 
 #include "mlx/backend/common/quantized.h"
 #include "mlx/backend/common/unary.h"
@@ -174,7 +174,8 @@ void _qmm_t(
 
     for (int n = 0; n < N; n++) {
       const T* x_local = x;
-      T sum = 0;
+      using Accum = std::conditional_t<bits == 1, float, T>;
+      Accum sum = 0;
       for (int k = 0; k < K; k += group_size) {
         T scale = *scales_local++;
         T bias = *biases_local++;
@@ -194,8 +195,16 @@ void _qmm_t(
             uint8_t wi = *w_local++;
 #pragma clang loop unroll(full)
             for (int p = 0; p < pack_factor; p++) {
-              sum +=
-                  (*x_local++) * (scale * static_cast<T>(wi & bitmask) + bias);
+              if constexpr (bits == 1) {
+                // Match dequantize-then-matmul: round each weight to T, but
+                // accumulate the dot product in float for FP16/BF16 inputs.
+                const T weight = scale * static_cast<T>(wi & bitmask) + bias;
+                sum +=
+                    static_cast<float>(*x_local++) * static_cast<float>(weight);
+              } else {
+                sum += (*x_local++) *
+                    (scale * static_cast<T>(wi & bitmask) + bias);
+              }
               if (bits != 8) {
                 wi >>= bits;
               }
@@ -1066,6 +1075,15 @@ uint8_t to_fp8_e8m0(float x) {
   return static_cast<uint8_t>(n + 127);
 }
 
+// Smallest E8M0 >= x, so a block's largest elements do not saturate.
+uint8_t to_fp8_e8m0_round_up(float x) {
+  uint8_t bits = to_fp8_e8m0(x);
+  if (bits < 0xFE && dequantize_scale<float, 32>(bits) < x) {
+    bits += 1;
+  }
+  return bits;
+}
+
 uint8_t to_fp4_e2m1(float x) {
   if (std::isnan(x)) {
     return 0x7;
@@ -1117,7 +1135,7 @@ void fp_quantize_dequantize(
     if (group_size == 16) {
       scale = dequantize_scale<float, 16>(detail::ToFP8()(scale));
     } else {
-      scale = dequantize_scale<float, 32>(to_fp8_e8m0(scale));
+      scale = dequantize_scale<float, 32>(to_fp8_e8m0_round_up(scale));
     }
 
     for (int j = 0; j < group_size; ++j) {

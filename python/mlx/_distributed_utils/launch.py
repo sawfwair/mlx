@@ -1,9 +1,9 @@
 # Copyright © 2025 Apple Inc.
 
 import argparse
-import base64
 import json
 import os
+import platform
 import shlex
 import shutil
 import sys
@@ -193,27 +193,40 @@ def _launch_with_io(command_class, arguments, verbose):
         to_write = [p.stdin.fileno()]
 
         stdin_buffer = b""
-        while p.poll() is None:
+        while True:
+            exited = p.poll() is not None
             try:
                 stdin_buffer += stdin_queue.get_nowait()
             except QueueEmpty:
                 pass
-            rlist, wlist, _ = select(to_read, to_write, [], 1.0)
+            rlist, wlist, _ = select(to_read, to_write, [], 0 if exited else 1.0)
             for fd in rlist:
                 is_stdout = fd == p.stdout.fileno()
-                msg = os.read(fd, 8192).decode(errors="ignore")
-                msg = command.preprocess_output(msg, is_stdout)
+                try:
+                    data = os.read(fd, 8192)
+                except BlockingIOError:
+                    continue
+                if not data:
+                    to_read.remove(fd)
+                    continue
+                msg = command.preprocess_output(data.decode(errors="ignore"), is_stdout)
                 if is_stdout:
                     stdout_queue.put(msg.encode())
                 else:
                     stderr_queue.put(msg.encode())
             for fd in wlist:
                 if len(stdin_buffer) > 0:
-                    n = os.write(fd, stdin_buffer)
+                    try:
+                        n = os.write(fd, stdin_buffer)
+                    except BrokenPipeError:
+                        to_write.remove(fd)
+                        continue
                     stdin_buffer = stdin_buffer[n:]
-            if stop:
-                command.terminate()
+            if exited and not rlist:
                 break
+            if stop and not exited:
+                command.terminate()
+
         exit_codes[rank] = command.exit_status
 
         if exit_codes[rank][1]:
@@ -376,9 +389,31 @@ def launch_jaccl(parser, hosts, args, command):
 
     jaccl_ring = args.backend == "jaccl-ring"
     have_rdmas = all(len(h.rdma) == len(hosts) for h in hosts)
+    if not have_rdmas:
+        parser.error(
+            "The hostfile is malformed: number of RDMA devices does not match hosts"
+        )
     have_nulls = all(h.rdma[i] is None for i, h in enumerate(hosts))
-    if not have_rdmas or not have_nulls:
-        parser.error("Malformed hostfile for jaccl backend")
+    if not have_nulls:
+        parser.error("The hostfile is malformed: RDMA device of self should be null")
+
+    # Find pairs that miss rmda in hostfile.
+    n = len(hosts)
+    missing_rdma = [
+        (i, j)
+        for i, h in enumerate(hosts)
+        for j in (((i - 1) % n, (i + 1) % n) if jaccl_ring else range(n))
+        if i != j and h.rdma[j] is None
+    ]
+
+    if missing_rdma:
+        pairs = ", ".join(
+            f"{hosts[i].ssh_hostname} to {hosts[j].ssh_hostname}"
+            for i, j in missing_rdma[:3]
+        )
+        if len(missing_rdma) > 3:
+            pairs += f" and {len(missing_rdma) - 3} more"
+        parser.error(f"The hostfile is malformed: no RDMA device is listed for {pairs}")
 
     coordinator = hosts[0].ips[0]
     env = args.env
@@ -418,7 +453,7 @@ def get_mpi_libname():
             filter(lambda line: "libmpi" in line, otool_output.splitlines())
         )
         return libmpi_line.strip().split()[0].removeprefix("@rpath/")
-    except:
+    except BaseException:
         return None
 
 
@@ -570,5 +605,6 @@ def main():
         launch_jaccl(parser, hostfile.hosts, args, rest)
     else:
         parser.error(
-            "The backend should be one of {'ring', 'mpi', 'nccl', 'jaccl', 'jaccl-ring'}"
+            "The backend should be one of "
+            "{'ring', 'mpi', 'nccl', 'jaccl', 'jaccl-ring'}"
         )
