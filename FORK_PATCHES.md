@@ -47,3 +47,10 @@ availability. The matched 127,242-token BF16 ablation fails with the global
 guard and matches stock upstream token-for-token with upstream availability.
 The quantized regression covers FP16/BF16 activations at the historical
 64-by-9216 threshold across 1/2/4/8-bit ordinary and gathered matmul.
+
+The wide-head NAX attention JIT instantiation uses the split kernel's original
+template signature, which has no separate value-head dimension. The ordinary
+kernel retains upstream's value-head parameter for asymmetric attention.
+Run the existing D256 and D512 attention regressions with `MLX_METAL_JIT=ON`
+as well as the AOT Metal configuration; AOT instantiations already used the
+correct split-kernel signature.
